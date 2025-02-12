@@ -1,42 +1,28 @@
 [package]
-name = "lwk_cli"
+name = "lwk_signer"
 version = "0.8.0"
 edition = "2021"
-autotests = false
-description = "Liquid Wallet Kit - Command line interface to interact with the RPC server"
+description = "Liquid Wallet Kit - Signers for PSETs (Partially Signed Elements Transactions)"
 license = "MIT OR BSD-2-Clause"
-documentation = "https://docs.rs/lwk_cli"
+documentation = "https://docs.rs/lwk_signer"
 
 [dependencies]
-lwk_app = { version = "0.8.0" }
-lwk_rpc_model = { version = "0.8.0" }
+lwk_common = { version = "0.8.0" }
+lwk_jade = { version = "0.8.0", optional = true }
+lwk_ledger = { version = "0.8.0", optional = true }
 
-anyhow = "1.0.75"
-clap = { version = "~4.5", features = ["derive", "env"] }
-# config = "0.13.3"
-log.workspace = true
-env_logger = "0.11.5"
-ctrlc = { version = "3.4.1", features = ["termination"] }
-serde_json = "1"
-clap_complete = "~4.5"
-uniffi = { version = "0.28.2", features = ["cli"], optional = true }
+bip39 = { version = "2.0.0", features = ["rand"] }
+elements-miniscript = { version = "0.4.0", features = ["base64"] }
+thiserror = "1.0.48"
+base64 = "0.13.0"
 
 [dev-dependencies]
-lwk_containers = { version = "0.8.0" }
 lwk_test_util = { version = "0.8.0" }
 
-shellwords = "1.1.0"
-elements = "0.25.0"
-tempfile = "3.8.0"
-
 [features]
-bindings = ["uniffi"]
-serial = ["lwk_app/serial"]
-registry = []
-
-[[test]]
-name = "e2e"
-path = "tests/cli.rs"
+default = ["jade"]
+jade = ["lwk_jade"]
+ledger = ["lwk_ledger"]
 
 [package.metadata.docs.rs]
 all-features = true
