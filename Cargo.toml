@@ -1,0 +1,42 @@
+[workspace]
+
+members = [
+    "lwk_app",
+    "lwk_bindings",
+    "lwk_cli",
+    "lwk_hwi",
+    "lwk_jade",
+    "lwk_ledger",
+    "lwk_signer",
+    "lwk_tiny_jrpc",
+    "lwk_wollet",
+    "lwk_containers",
+    "lwk_common",
+    "lwk_rpc_model",
+    "lwk_test_util",
+    "lwk_wasm",
+]
+resolver = "2"
+
+[patch.crates-io]
+lwk_app = { path = "lwk_app" }
+lwk_common = { path = "lwk_common" }
+lwk_containers = { path = "lwk_containers" }
+lwk_jade = { path = "lwk_jade" }
+lwk_ledger = { path = "lwk_ledger" }
+lwk_rpc_model = { path = "lwk_rpc_model" }
+lwk_signer = { path = "lwk_signer" }
+lwk_test_util = { path = "lwk_test_util" }
+lwk_tiny_jrpc = { path = "lwk_tiny_jrpc" }
+lwk_wollet = { path = "lwk_wollet" }
+
+[profile.release-smaller]
+inherits = "release"
+opt-level = 'z'      # Optimize for size.
+lto = true           # Enable Link Time Optimization
+codegen-units = 1    # Reduce number of codegen units to increase optimizations.
+panic = "abort"      # Abort on panic
+strip = "debuginfo"  # Partially strip symbols from binary
+
+[workspace.dependencies]
+log = "0.4.22"

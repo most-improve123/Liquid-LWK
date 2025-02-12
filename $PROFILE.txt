@@ -1,0 +1,3 @@
+function cli {
+    & "C:\Users\MINED\Downloads\lwk-master\lwk-master\target\release\lwk_cli.exe" $args
+}

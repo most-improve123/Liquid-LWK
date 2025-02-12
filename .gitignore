@@ -1,0 +1,15 @@
+target*
+*swp
+bak*
+bin/
+.vscode
+debug.log
+lwk_bindings.kt
+.idea
+flash_image.bin
+qemu_efuse.bin
+context/jade-emulator/Dockerfile
+.direnv
+result
+*__pycache__
+venv/
