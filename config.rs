@@ -1,135 +1,121 @@
-use lwk_common::electrum_ssl::LIQUID_SOCKET;
-use lwk_common::electrum_ssl::LIQUID_TESTNET_SOCKET;
-use lwk_jade::Network as JadeNetwork;
-use lwk_jade::TIMEOUT;
-use lwk_wollet::elements::AssetId;
-use lwk_wollet::ElementsNetwork;
-use std::fs;
-use std::net::SocketAddr;
-use std::path::PathBuf;
+use crate::elements::{AddressParams, AssetId};
+use crate::error::Error;
 use std::str::FromStr;
-use std::time::Duration;
 
-use crate::{consts, Error};
+const LIQUID_POLICY_ASSET_STR: &str =
+    "6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d";
+const LIQUID_TESTNET_POLICY_ASSET_STR: &str =
+    "144c654344aa716d6f3abcc1ca90e5641e4e2a7f633bc09fe3baf64585819a49";
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
+pub enum ElementsNetwork {
+    Liquid,
+    LiquidTestnet,
+    ElementsRegtest { policy_asset: AssetId },
+}
+
+impl ElementsNetwork {
+    pub fn policy_asset(&self) -> AssetId {
+        match self {
+            ElementsNetwork::Liquid => {
+                AssetId::from_str(LIQUID_POLICY_ASSET_STR).expect("can't fail on const")
+            }
+            ElementsNetwork::LiquidTestnet => {
+                AssetId::from_str(LIQUID_TESTNET_POLICY_ASSET_STR).expect("can't fail on const")
+            }
+            ElementsNetwork::ElementsRegtest { policy_asset } => *policy_asset,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ElementsNetwork::Liquid => "liquid",
+            ElementsNetwork::LiquidTestnet => "liquid-testnet",
+            ElementsNetwork::ElementsRegtest { .. } => "liquid-regtest",
+        }
+    }
+
+    pub fn address_params(&self) -> &'static AddressParams {
+        match self {
+            ElementsNetwork::Liquid => &AddressParams::LIQUID,
+            ElementsNetwork::LiquidTestnet => &AddressParams::LIQUID_TESTNET,
+            ElementsNetwork::ElementsRegtest { .. } => &AddressParams::ELEMENTS,
+        }
+    }
+
+    pub fn default_regtest() -> ElementsNetwork {
+        let policy_asset =
+            AssetId::from_str("5ac9f65c0efcc4775e0baec4ec03abdde22473cd3cf33c0419ca290e0751b225")
+                .expect("static");
+
+        ElementsNetwork::ElementsRegtest { policy_asset }
+    }
+
+    /// Return the dynamic epoch length of this network
+    pub fn dynamic_epoch_length(&self) -> u32 {
+        // taken from elements chainparams.cpp
+        // TODO upstream to rust elements
+        match self {
+            ElementsNetwork::Liquid => 20160,
+            ElementsNetwork::LiquidTestnet => 1000,
+            ElementsNetwork::ElementsRegtest { policy_asset: _ } => 10,
+        }
+    }
+
+    /// Return the dynamic epoch length of this network
+    pub fn total_valid_epochs(&self) -> u32 {
+        // taken from elements chainparams.cpp
+        // TODO upstream to rust elements
+        match self {
+            ElementsNetwork::Liquid => 2,
+            ElementsNetwork::LiquidTestnet => 0,
+            ElementsNetwork::ElementsRegtest { policy_asset: _ } => 0,
+        }
+    }
+
+    #[cfg(feature = "bindings")]
+    pub fn tx_builder(&self) -> crate::TxBuilder {
+        crate::TxBuilder::new(*self)
+    }
+}
+
+#[derive(Debug, Clone, Hash)]
 pub struct Config {
-    /// The address where the RPC server is listening or the client is connecting to
-    pub addr: SocketAddr,
-    pub datadir: PathBuf,
-    pub electrum_url: String,
-    pub network: ElementsNetwork,
-    pub tls: bool,
-    pub validate_domain: bool,
-
-    pub explorer_url: String,
-
-    // Unfortunately we cannot always derive the "api" url from "explorer_url", thus we need two separate values
-    pub esplora_api_url: String,
-
-    pub registry_url: String,
-    pub timeout: Duration,
-    pub scanning_interval: Duration,
+    network: ElementsNetwork,
 }
 
 impl Config {
-    pub fn default_testnet(datadir: PathBuf) -> Self {
-        Self {
-            addr: consts::DEFAULT_ADDR.into(),
-            datadir,
-            electrum_url: LIQUID_TESTNET_SOCKET.into(),
-            network: ElementsNetwork::LiquidTestnet,
-            tls: true,
-            validate_domain: true,
-            explorer_url: "https://blockstream.info/liquidtestnet/".into(),
-            esplora_api_url: "https://blockstream.info/liquidtestnet/api/".into(),
-            registry_url: "https://assets-testnet.blockstream.info/".into(),
-            timeout: TIMEOUT,
-            scanning_interval: consts::SCANNING_INTERVAL,
-        }
+    pub fn new(network: ElementsNetwork) -> Result<Self, Error> {
+        Ok(Config { network })
     }
 
-    pub fn default_mainnet(datadir: PathBuf) -> Self {
-        Self {
-            addr: consts::DEFAULT_ADDR.into(),
-            datadir,
-            electrum_url: LIQUID_SOCKET.into(),
-            network: ElementsNetwork::Liquid,
-            tls: true,
-            validate_domain: true,
-            explorer_url: "https://blockstream.info/liquid/".into(),
-            esplora_api_url: "https://blockstream.info/liquid/api/".into(),
-            registry_url: "https://assets.blockstream.info/".into(),
-            timeout: TIMEOUT,
-            scanning_interval: consts::SCANNING_INTERVAL,
-        }
+    pub fn address_params(&self) -> &'static AddressParams {
+        self.network.address_params()
     }
 
-    /// For regtest there are no reasonable default for `electrum_url`, `explorer_url`, `esplora_api_url` and `registry_url`
-    /// It will be caller responsability to mutate them according to regtest env
-    pub fn default_regtest(datadir: PathBuf) -> Self {
-        let policy_asset = "5ac9f65c0efcc4775e0baec4ec03abdde22473cd3cf33c0419ca290e0751b225";
-        let policy_asset = AssetId::from_str(policy_asset).expect("static");
-        Self {
-            addr: consts::DEFAULT_ADDR.into(),
-            datadir,
-            electrum_url: "".into(),
-            network: ElementsNetwork::ElementsRegtest { policy_asset },
-            tls: false,
-            validate_domain: false,
-            explorer_url: "".into(),
-            esplora_api_url: "".into(),
-            registry_url: "".into(),
-            timeout: TIMEOUT,
-            // Scan more frequently while testing
-            scanning_interval: Duration::from_secs(1),
-        }
+    pub fn policy_asset(&self) -> AssetId {
+        self.network.policy_asset()
     }
 
-    pub fn jade_network(&self) -> JadeNetwork {
-        match self.network {
-            ElementsNetwork::Liquid => JadeNetwork::Liquid,
-            ElementsNetwork::LiquidTestnet => JadeNetwork::TestnetLiquid,
-            ElementsNetwork::ElementsRegtest { .. } => JadeNetwork::LocaltestLiquid,
-        }
+    pub fn network(&self) -> ElementsNetwork {
+        self.network
     }
+}
 
-    pub fn default_home() -> Result<PathBuf, Error> {
-        let mut path = home::home_dir().ok_or(Error::Generic("Cannot get home dir".into()))?;
-        path.push(".lwk");
-        fs::create_dir_all(&path)?;
-        Ok(path)
-    }
+#[cfg(test)]
+mod test {
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::{Hash, Hasher},
+    };
 
-    /// Appends the network to the given datadir
-    pub fn datadir(&self) -> Result<PathBuf, Error> {
-        let mut path: PathBuf = self.datadir.clone();
-        path.push(self.network.as_str());
-        fs::create_dir_all(&path)?;
-        Ok(path)
-    }
+    use super::Config;
 
-    /// Returns the path of the state file under datadir
-    pub fn state_path(&self) -> Result<PathBuf, Error> {
-        let mut path = self.datadir()?;
-        path.push("state.json");
-        Ok(path)
-    }
-
-    /// True if Liquid mainnet
-    pub fn is_mainnet(&self) -> bool {
-        matches!(self.network, ElementsNetwork::Liquid)
-    }
-
-    fn electrum_url(&self) -> Result<lwk_wollet::ElectrumUrl, Error> {
-        Ok(
-            lwk_wollet::ElectrumUrl::new(&self.electrum_url, self.tls, self.validate_domain)
-                .map_err(lwk_wollet::Error::Url)?,
-        )
-    }
-
-    pub fn electrum_client(&self) -> Result<lwk_wollet::ElectrumClient, Error> {
-        // TODO cache it instead of recreating every time
-        Ok(lwk_wollet::ElectrumClient::new(&self.electrum_url()?)?)
+    #[test]
+    fn test_config_hash() {
+        let config = Config::new(crate::ElementsNetwork::Liquid).unwrap();
+        let mut hasher = DefaultHasher::new();
+        config.hash(&mut hasher);
+        assert_eq!(13646096770106105413, hasher.finish());
     }
 }

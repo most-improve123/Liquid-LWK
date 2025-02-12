@@ -1,10 +1,10 @@
-use elements::{hex::ToHex, pset::serialize::Deserialize};
+use crate::Error;
+use lwk_wollet::elements::{self, hex::ToHex, pset::serialize::Deserialize};
+use lwk_wollet::hashes::hex::FromHex;
+use wasm_bindgen::prelude::*;
 
-use crate::{types::Hex, LwkError};
-use std::{fmt::Display, sync::Arc};
-
-#[derive(uniffi::Object)]
-#[uniffi::export(Display)]
+/// Wrapper of [`elements::Script`]
+#[wasm_bindgen]
 pub struct Script {
     inner: elements::Script,
 }
@@ -15,31 +15,34 @@ impl From<elements::Script> for Script {
     }
 }
 
-impl From<Script> for elements::Script {
-    fn from(script: Script) -> elements::Script {
-        script.inner
+impl From<&elements::Script> for Script {
+    fn from(inner: &elements::Script) -> Self {
+        Self {
+            inner: inner.clone(),
+        }
     }
 }
 
-impl From<&Script> for elements::Script {
-    fn from(script: &Script) -> elements::Script {
-        script.inner.clone()
+impl AsRef<elements::Script> for Script {
+    fn as_ref(&self) -> &elements::Script {
+        &self.inner
     }
 }
 
-impl Display for Script {
+impl std::fmt::Display for Script {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.inner.to_hex())
     }
 }
 
-#[uniffi::export]
+#[wasm_bindgen]
 impl Script {
-    /// Construct a Script object
-    #[uniffi::constructor]
-    pub fn new(hex: &Hex) -> Result<Arc<Self>, LwkError> {
-        let inner = elements::Script::deserialize(hex.as_ref())?;
-        Ok(Arc::new(Self { inner }))
+    /// Creates a `Script`
+    #[wasm_bindgen(constructor)]
+    pub fn new(s: &str) -> Result<Script, Error> {
+        let bytes = Vec::<u8>::from_hex(s)?;
+        let inner = elements::Script::deserialize(&bytes[..])?;
+        Ok(inner.into())
     }
 
     pub fn bytes(&self) -> Vec<u8> {
@@ -49,27 +52,27 @@ impl Script {
     pub fn asm(&self) -> String {
         self.inner.asm()
     }
+
+    #[wasm_bindgen(js_name = toString)]
+    pub fn to_string_js(&self) -> String {
+        format!("{}", self)
+    }
 }
 
-#[uniffi::export]
-pub fn is_provably_segwit(script_pubkey: &Script, redeem_script: &Option<Arc<Script>>) -> bool {
-    lwk_common::is_provably_segwit(
-        &script_pubkey.into(),
-        &redeem_script.as_ref().map(|s| s.as_ref().into()),
-    )
-}
-
-#[cfg(test)]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
-    use elements::hashes::hex::FromHex;
 
-    use super::{is_provably_segwit, Script};
+    use super::Script;
+    use lwk_wollet::elements::hex::FromHex;
+    use wasm_bindgen_test::*;
 
-    #[test]
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
     fn script() {
-        let script_str = "0020d2e99f0c38089c08e5e1080ff6658c6075afaa7699d384333d956c470881afde";
+        let script_str = "76a914088ac47276d105b91cf9aa27a00112421dd5f23c88ac";
 
-        let script = Script::new(&script_str.parse().unwrap()).unwrap();
+        let script = Script::new(script_str).unwrap();
         assert_eq!(script.to_string(), script_str);
 
         let script_bytes = Vec::<u8>::from_hex(script_str).unwrap();
@@ -77,9 +80,7 @@ mod tests {
 
         assert_eq!(
             script.asm(),
-            "OP_0 OP_PUSHBYTES_32 d2e99f0c38089c08e5e1080ff6658c6075afaa7699d384333d956c470881afde"
+            "OP_DUP OP_HASH160 OP_PUSHBYTES_20 088ac47276d105b91cf9aa27a00112421dd5f23c OP_EQUALVERIFY OP_CHECKSIG"
         );
-
-        assert!(is_provably_segwit(&script, &None));
     }
 }

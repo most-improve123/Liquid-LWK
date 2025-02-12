@@ -1,7 +1,11 @@
-use crate::{types::AssetId, Transaction, Txid, WalletTxOut};
-use std::{collections::HashMap, sync::Arc};
+use crate::{Error, OptionWalletTxOut, Transaction, Txid};
+use serde::Serialize;
+use serde_wasm_bindgen::Serializer;
+use wasm_bindgen::prelude::*;
 
-#[derive(uniffi::Object, Debug)]
+/// Wrapper of [`lwk_wollet::WalletTx`]
+#[derive(Debug)]
+#[wasm_bindgen]
 pub struct WalletTx {
     inner: lwk_wollet::WalletTx,
 }
@@ -12,34 +16,31 @@ impl From<lwk_wollet::WalletTx> for WalletTx {
     }
 }
 
-#[uniffi::export]
+#[wasm_bindgen]
 impl WalletTx {
-    pub fn tx(&self) -> Arc<Transaction> {
-        let tx: Transaction = self.inner.tx.clone().into();
-        Arc::new(tx)
+    pub fn tx(&self) -> Transaction {
+        self.inner.tx.clone().into()
     }
 
     pub fn height(&self) -> Option<u32> {
         self.inner.height
     }
 
-    pub fn balance(&self) -> HashMap<AssetId, i64> {
-        self.inner
-            .balance
-            .iter()
-            .map(|(k, v)| (AssetId::from(*k), *v))
-            .collect()
+    pub fn balance(&self) -> Result<JsValue, Error> {
+        let serializer = Serializer::new().serialize_large_number_types_as_bigints(true);
+        Ok(self.inner.balance.serialize(&serializer)?)
     }
 
-    pub fn txid(&self) -> Arc<Txid> {
-        Arc::new(self.inner.txid.into())
+    pub fn txid(&self) -> Txid {
+        self.inner.txid.into()
     }
 
     pub fn fee(&self) -> u64 {
         self.inner.fee
     }
 
-    pub fn type_(&self) -> String {
+    #[wasm_bindgen(js_name = txType)]
+    pub fn tx_type(&self) -> String {
         self.inner.type_.clone()
     }
 
@@ -47,34 +48,38 @@ impl WalletTx {
         self.inner.timestamp
     }
 
-    pub fn inputs(&self) -> Vec<Option<Arc<WalletTxOut>>> {
+    pub fn inputs(&self) -> Vec<OptionWalletTxOut> {
         self.inner
             .inputs
-            .iter()
-            .map(|e| e.as_ref().cloned().map(Into::into).map(Arc::new))
+            .clone()
+            .into_iter()
+            .map(Into::into)
             .collect()
     }
 
-    pub fn outputs(&self) -> Vec<Option<Arc<WalletTxOut>>> {
+    pub fn outputs(&self) -> Vec<OptionWalletTxOut> {
         self.inner
             .outputs
-            .iter()
-            .map(|e| e.as_ref().cloned().map(Into::into).map(Arc::new))
+            .clone()
+            .into_iter()
+            .map(Into::into)
             .collect()
     }
 
+    #[wasm_bindgen(js_name = unblindedUrl)]
     pub fn unblinded_url(&self, explorer_url: &str) -> String {
         self.inner.unblinded_url(explorer_url)
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use crate::WalletTx;
-    use elements::{hex::FromHex, pset::serialize::Deserialize};
-    use std::collections::{BTreeMap, HashMap};
+    use lwk_wollet::elements::{self, hex::FromHex, pset::serialize::Deserialize};
+    use std::collections::HashMap;
+    use wasm_bindgen_test::*;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn wallet_tx() {
         let tx_out = lwk_wollet::WalletTxOut {
             outpoint: elements::OutPoint::null(),
@@ -95,11 +100,12 @@ mod tests {
         let tx_bytes = Vec::<u8>::from_hex(&tx_hex).unwrap();
         let tx: elements::Transaction = elements::Transaction::deserialize(&tx_bytes).unwrap();
 
+        let a = elements::AssetId::default();
         let el = lwk_wollet::WalletTx {
-            tx: tx.clone(),
             txid: tx.txid(),
+            tx: tx.clone(),
             height: Some(4),
-            balance: BTreeMap::new(),
+            balance: vec![(a, 10)].into_iter().collect(),
             fee: 23,
             type_: "type".to_string(),
             timestamp: Some(124),
@@ -109,15 +115,17 @@ mod tests {
 
         let wallet_tx: WalletTx = el.clone().into();
 
-        assert_eq!(*wallet_tx.tx(), tx.into());
+        assert_eq!(wallet_tx.tx(), tx.into());
 
         assert_eq!(wallet_tx.height(), Some(4));
 
-        assert_eq!(wallet_tx.balance(), HashMap::new());
+        let balance: HashMap<elements::AssetId, i64> =
+            serde_wasm_bindgen::from_value(wallet_tx.balance().unwrap()).unwrap();
+        assert_eq!(balance.get(&a), Some(&10));
 
         assert_eq!(wallet_tx.fee(), 23);
 
-        assert_eq!(wallet_tx.type_(), "type");
+        assert_eq!(wallet_tx.tx_type(), "type");
 
         assert_eq!(wallet_tx.timestamp(), Some(124));
 

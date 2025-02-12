@@ -1,8 +1,10 @@
-use crate::{LwkError, Txid};
-use std::{fmt::Display, sync::Arc};
+use crate::{Error, Txid};
+use lwk_wollet::elements;
+use std::fmt::Display;
+use wasm_bindgen::prelude::*;
 
-#[derive(uniffi::Object)]
-#[uniffi::export(Display)]
+/// Wrapper of [`elements::OutPoint`]
+#[wasm_bindgen]
 pub struct OutPoint {
     inner: elements::OutPoint,
 }
@@ -19,17 +21,17 @@ impl Display for OutPoint {
     }
 }
 
-#[uniffi::export]
+#[wasm_bindgen]
 impl OutPoint {
-    /// Construct an OutPoint object
-    #[uniffi::constructor]
-    pub fn new(s: &str) -> Result<Arc<Self>, LwkError> {
-        let inner: elements::OutPoint = s.parse()?;
-        Ok(Arc::new(Self { inner }))
+    /// Creates an `OutPoint`
+    #[wasm_bindgen(constructor)]
+    pub fn new(s: &str) -> Result<OutPoint, Error> {
+        let out_point: elements::OutPoint = s.parse()?;
+        Ok(out_point.into())
     }
 
-    pub fn txid(&self) -> Arc<Txid> {
-        Arc::new(self.inner.txid.into())
+    pub fn txid(&self) -> Txid {
+        self.inner.txid.into()
     }
 
     pub fn vout(&self) -> u32 {
@@ -37,12 +39,16 @@ impl OutPoint {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use crate::OutPoint;
+    use lwk_wollet::elements;
     use std::str::FromStr;
+    use wasm_bindgen_test::*;
 
-    #[test]
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
     fn out_point() {
         let expected_txid = "0000000000000000000000000000000000000000000000000000000000000001";
         let expected_vout = 1;

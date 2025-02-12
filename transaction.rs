@@ -1,30 +1,34 @@
-use elements::{
-    hex::ToHex,
-    pset::serialize::{Deserialize, Serialize},
+use crate::{AssetId, Error};
+use lwk_wollet::{
+    elements::{
+        self,
+        hex::ToHex,
+        pset::serialize::{Deserialize, Serialize},
+    },
+    hashes::hex::FromHex,
 };
-use lwk_wollet::WalletTx;
+use std::str::FromStr;
+use wasm_bindgen::prelude::*;
 
-use crate::{
-    types::{AssetId, Hex},
-    LwkError, TxIn, TxOut, Txid,
-};
-use std::{fmt::Display, sync::Arc};
-
-#[derive(uniffi::Object, PartialEq, Eq, Debug, Clone)]
-#[uniffi::export(Display)]
+/// A Liquid transaction, wrapper of [`elements::Transaction`]
+///
+/// See [`crate::WalletTx`] for the transaction as seen from the perspective of the wallet
+/// where you can actually see unblinded amounts and tx net-balance.
+#[wasm_bindgen]
+#[derive(PartialEq, Eq, Debug, Hash, Clone)]
 pub struct Transaction {
     inner: elements::Transaction,
 }
 
-impl From<WalletTx> for Transaction {
-    fn from(value: WalletTx) -> Self {
-        Self { inner: value.tx }
+impl std::fmt::Display for Transaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner.serialize().to_hex())
     }
 }
 
 impl From<elements::Transaction> for Transaction {
     fn from(inner: elements::Transaction) -> Self {
-        Self { inner }
+        Transaction { inner }
     }
 }
 
@@ -34,35 +38,18 @@ impl From<Transaction> for elements::Transaction {
     }
 }
 
-impl From<&Transaction> for elements::Transaction {
-    fn from(value: &Transaction) -> Self {
-        value.inner.clone()
-    }
-}
-
-impl Display for Transaction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.inner.serialize().to_hex())
-    }
-}
-
-impl AsRef<elements::Transaction> for Transaction {
-    fn as_ref(&self) -> &elements::Transaction {
-        &self.inner
-    }
-}
-
-#[uniffi::export]
+#[wasm_bindgen]
 impl Transaction {
-    /// Construct a Transaction object
-    #[uniffi::constructor]
-    pub fn new(hex: &Hex) -> Result<Arc<Self>, LwkError> {
-        let inner: elements::Transaction = elements::Transaction::deserialize(hex.as_ref())?;
-        Ok(Arc::new(Self { inner }))
+    /// Creates a `Transaction`
+    #[wasm_bindgen(constructor)]
+    pub fn new(tx_hex: &str) -> Result<Transaction, Error> {
+        let bytes = Vec::<u8>::from_hex(tx_hex)?;
+        let tx: elements::Transaction = elements::Transaction::deserialize(&bytes)?;
+        Ok(tx.into())
     }
 
-    pub fn txid(&self) -> Arc<Txid> {
-        Arc::new(self.inner.txid().into())
+    pub fn txid(&self) -> Txid {
+        self.inner.txid().into()
     }
 
     pub fn bytes(&self) -> Vec<u8> {
@@ -73,71 +60,93 @@ impl Transaction {
         self.inner.fee_in((*policy_asset).into())
     }
 
-    pub fn outputs(&self) -> Vec<Arc<TxOut>> {
-        self.inner
-            .output
-            .iter()
-            .map(|o| Arc::new(o.clone().into()))
-            .collect()
-    }
-
-    pub fn inputs(&self) -> Vec<Arc<TxIn>> {
-        self.inner
-            .input
-            .iter()
-            .map(|i| Arc::new(i.clone().into()))
-            .collect()
+    #[wasm_bindgen(js_name = toString)]
+    pub fn to_string_js(&self) -> String {
+        format!("{}", self)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use elements::hex::ToHex;
+/// A valid transaction identifier.
+///
+/// 32 bytes encoded as hex string.
+#[wasm_bindgen]
+#[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
+pub struct Txid {
+    inner: elements::Txid,
+}
 
-    use super::Transaction;
+impl std::fmt::Display for Txid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
 
-    #[test]
-    fn transaction() {
-        let tx_expected =
-            include_str!("../../../lwk_jade/test_data/pset_to_be_signed_transaction.hex")
-                .to_string();
-        let tx = Transaction::new(&tx_expected.parse().unwrap()).unwrap();
+impl From<elements::Txid> for Txid {
+    fn from(inner: elements::Txid) -> Self {
+        Txid { inner }
+    }
+}
 
-        assert_eq!(tx_expected, tx.to_string());
+impl From<Txid> for elements::Txid {
+    fn from(value: Txid) -> Self {
+        value.inner
+    }
+}
 
-        assert_eq!(
-            tx.txid().to_string(),
-            "954f32449d00a9de3c42758dedee895c88ea417cb72999738b2631bcc00e13ad"
-        );
-
-        assert_eq!(tx.bytes().to_hex(), tx_expected);
+#[wasm_bindgen]
+impl Txid {
+    /// Creates a `Txid`
+    #[wasm_bindgen(constructor)]
+    pub fn new(tx_id: &str) -> Result<Txid, Error> {
+        Ok(elements::Txid::from_str(tx_id)?.into())
     }
 
-    #[test]
-    fn external_unblind() {
-        let network = crate::network::Network::regtest_default();
-        let desc = "ct(slip77(9c8e4f05c7711a98c838be228bcb84924d4570ca53f35fa1c793e58841d47023),elwpkh([73c5da0a/84'/1'/0']tpubDC8msFGeGuwnKG9Upg7DM2b4DaRqg3CUZa5g8v2SRQ6K4NSkxUgd7HsL2XVWbVm39yBA4LAxysQAm397zwQSQoQgewGiYZqrA9DsP4zbQ1M/<0;1>/*))#2e4n992d";
-        let desc = crate::WolletDescriptor::new(desc).unwrap();
-        let tx_hex = include_str!("../../tests/test_data/tx.hex").to_string();
-        let tx = Transaction::new(&tx_hex.parse().unwrap()).unwrap();
-        for output in tx.outputs() {
-            if output.is_fee() {
-                assert!(!output.is_partially_blinded());
-                assert_eq!(output.asset().unwrap(), network.policy_asset());
-                assert_eq!(output.value().unwrap(), 250);
-                assert!(output.script_pubkey().bytes().is_empty());
-            } else {
-                assert!(output.is_partially_blinded());
-                assert!(output.asset().is_none());
-                assert!(output.value().is_none());
-                let script_pubkey = output.script_pubkey();
-                assert!(!script_pubkey.bytes().is_empty());
-                let private_blinding_key = desc.derive_blinding_key(&script_pubkey).unwrap();
-                let txout_secrets = output.unblind(&private_blinding_key).unwrap();
-                assert_eq!(txout_secrets.asset(), network.policy_asset());
-            }
-        }
-        tx.outputs().iter().find(|o| o.is_fee()).unwrap();
-        tx.outputs().iter().find(|o| !o.is_fee()).unwrap();
+    #[wasm_bindgen(js_name = toString)]
+    pub fn to_string_js(&self) -> String {
+        format!("{}", self)
+    }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use crate::{AssetId, Transaction, Txid};
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    async fn test_tx_id() {
+        let expected = "HexToArray(InvalidLength(InvalidLengthError { expected: 64, invalid: 2 }))";
+        let hex = "xx";
+        assert_eq!(expected, format!("{:?}", Txid::new(hex).unwrap_err()));
+
+        let expected = "HexToArray(InvalidChar(InvalidCharError { invalid: 120 }))";
+        let hex = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+        assert_eq!(expected, format!("{:?}", Txid::new(hex).unwrap_err()));
+
+        let hex = "0000000000000000000000000000000000000000000000000000000000000001";
+        assert_eq!(hex, Txid::new(hex).unwrap().to_string());
+    }
+
+    #[wasm_bindgen_test]
+    async fn test_transaction() {
+        let expected = "HexToBytes(InvalidChar(InvalidCharError { invalid: 120 }))";
+        let hex = "xx";
+        assert_eq!(
+            expected,
+            format!("{:?}", Transaction::new(hex).unwrap_err())
+        );
+
+        let expected =
+            include_str!("../../../lwk_jade/test_data/pset_to_be_signed_transaction.hex")
+                .to_string();
+        let tx = Transaction::new(&expected).unwrap();
+        assert_eq!(expected, tx.to_string());
+
+        let expected = "954f32449d00a9de3c42758dedee895c88ea417cb72999738b2631bcc00e13ad";
+        assert_eq!(expected, tx.txid().to_string());
+
+        let policy_asset = "5ac9f65c0efcc4775e0baec4ec03abdde22473cd3cf33c0419ca290e0751b225";
+        assert_eq!(tx.fee(&AssetId::new(policy_asset).unwrap()), 250);
     }
 }

@@ -1,13 +1,11 @@
-use crate::{types::AssetId, LwkError, Script, Transaction, Txid};
-use elements::pset::{Input, PartiallySignedTransaction};
-use elements::{hashes::Hash, BlockHash};
-use lwk_wollet::elements_miniscript::psbt::finalize;
-use lwk_wollet::EC;
-use std::{fmt::Display, sync::Arc};
+use crate::{AssetId, Error, Transaction, Txid};
+use lwk_wollet::elements::pset::{Input, PartiallySignedTransaction};
+use std::fmt::Display;
+use wasm_bindgen::prelude::*;
 
-/// Partially Signed Elements Transaction, wrapper over [`elements::pset::PartiallySignedTransaction`]
-#[derive(uniffi::Object, PartialEq, Debug)]
-#[uniffi::export(Display)]
+/// Partially Signed Elements Transaction, wrapper of [`PartiallySignedTransaction`]
+#[wasm_bindgen]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Pset {
     inner: PartiallySignedTransaction,
 }
@@ -18,66 +16,67 @@ impl From<PartiallySignedTransaction> for Pset {
     }
 }
 
+impl From<Pset> for PartiallySignedTransaction {
+    fn from(pset: Pset) -> Self {
+        pset.inner
+    }
+}
+
 impl Display for Pset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.inner)
     }
 }
 
-#[uniffi::export]
+#[wasm_bindgen]
 impl Pset {
-    /// Construct a Watch-Only wallet object
-    #[uniffi::constructor]
-    pub fn new(base64: &str) -> Result<Arc<Self>, LwkError> {
-        let inner: PartiallySignedTransaction = base64.trim().parse()?;
-        Ok(Arc::new(Pset { inner }))
+    /// Creates a `Pset`
+    #[wasm_bindgen(constructor)]
+    pub fn new(base64: &str) -> Result<Pset, Error> {
+        let pset: PartiallySignedTransaction = base64.trim().parse()?;
+        Ok(pset.into())
     }
 
-    /// Finalize and extract the PSET
-    pub fn finalize(&self) -> Result<Arc<Transaction>, LwkError> {
-        let mut pset = self.inner.clone();
-        finalize(&mut pset, &EC, BlockHash::all_zeros())?;
-        let tx: Transaction = pset.extract_tx()?.into();
-        Ok(Arc::new(tx))
+    #[wasm_bindgen(js_name = toString)]
+    pub fn to_string_js(&self) -> String {
+        format!("{}", self)
     }
 
-    pub fn extract_tx(&self) -> Result<Arc<Transaction>, LwkError> {
+    #[wasm_bindgen(js_name = extractTx)]
+    pub fn extract_tx(&self) -> Result<Transaction, Error> {
         let tx: Transaction = self.inner.extract_tx()?.into();
-        Ok(Arc::new(tx))
+        Ok(tx)
     }
 
-    pub fn inputs(&self) -> Vec<Arc<PsetInput>> {
-        self.inner
-            .inputs()
-            .iter()
-            .map(|i| Arc::new(i.clone().into()))
-            .collect()
+    pub fn combine(&mut self, other: Pset) -> Result<(), Error> {
+        self.inner.merge(other.into())?;
+        Ok(())
     }
-}
 
-impl Pset {
-    pub(crate) fn inner(&self) -> PartiallySignedTransaction {
-        self.inner.clone()
+    pub fn inputs(&self) -> Vec<PsetInput> {
+        self.inner.inputs().iter().map(Into::into).collect()
     }
 }
 
 /// PSET input
-#[derive(uniffi::Object, Debug)]
+#[wasm_bindgen]
 pub struct PsetInput {
     inner: Input,
 }
 
-impl From<Input> for PsetInput {
-    fn from(inner: Input) -> Self {
-        Self { inner }
+impl From<&Input> for PsetInput {
+    fn from(inner: &Input) -> Self {
+        Self {
+            inner: inner.clone(),
+        }
     }
 }
 
-#[uniffi::export]
+#[wasm_bindgen]
 impl PsetInput {
     /// Prevout TXID of the input
-    pub fn previous_txid(&self) -> Arc<Txid> {
-        Arc::new(self.inner.previous_txid.into())
+    pub fn previous_txid(&self) -> Txid {
+        self.inner.previous_txid.into()
     }
 
     /// Prevout vout of the input
@@ -85,23 +84,8 @@ impl PsetInput {
         self.inner.previous_output_index
     }
 
-    /// Prevout scriptpubkey of the input
-    pub fn previous_script_pubkey(&self) -> Option<Arc<Script>> {
-        self.inner
-            .witness_utxo
-            .as_ref()
-            .map(|txout| Arc::new(txout.script_pubkey.clone().into()))
-    }
-
-    /// Redeem script of the input
-    pub fn redeem_script(&self) -> Option<Arc<Script>> {
-        self.inner
-            .redeem_script
-            .as_ref()
-            .map(|s| Arc::new(s.clone().into()))
-    }
-
     /// If the input has an issuance, the asset id
+    #[wasm_bindgen(js_name = issuanceAsset)]
     pub fn issuance_asset(&self) -> Option<AssetId> {
         self.inner
             .has_issuance()
@@ -109,6 +93,7 @@ impl PsetInput {
     }
 
     /// If the input has an issuance, the token id
+    #[wasm_bindgen(js_name = issuanceToken)]
     pub fn issuance_token(&self) -> Option<AssetId> {
         self.inner
             .has_issuance()
@@ -116,11 +101,14 @@ impl PsetInput {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
     use super::Pset;
+    use wasm_bindgen_test::*;
 
-    #[test]
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
     fn pset_roundtrip() {
         let pset_string =
             include_str!("../../lwk_jade/test_data/pset_to_be_signed.base64").to_string();
@@ -128,18 +116,17 @@ mod tests {
 
         let tx_expected =
             include_str!("../../lwk_jade/test_data/pset_to_be_signed_transaction.hex").to_string();
-        let tx = pset.extract_tx().unwrap();
-        assert_eq!(tx_expected, tx.to_string());
+        let tx_string = pset.extract_tx().unwrap().to_string();
+        assert_eq!(tx_expected, tx_string);
 
         assert_eq!(pset_string, pset.to_string());
 
-        assert_eq!(pset.inputs().len(), tx.inputs().len());
         let pset_in = &pset.inputs()[0];
-        let tx_in = &tx.inputs()[0];
-        assert_eq!(pset_in.previous_txid(), tx_in.outpoint().txid());
-        assert_eq!(pset_in.previous_vout(), tx_in.outpoint().vout());
-        assert!(pset_in.previous_script_pubkey().is_some());
-        assert!(pset_in.redeem_script().is_none());
+        assert_eq!(
+            pset_in.previous_txid().to_string(),
+            "0093c96a69e9ea00b5409611f23435b6639c157afa1c88cf18960715ea10116c"
+        );
+        assert_eq!(pset_in.previous_vout(), 0);
 
         assert!(pset_in.issuance_asset().is_none());
         assert!(pset_in.issuance_token().is_none());

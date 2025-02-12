@@ -1,6 +1,10 @@
-use crate::types::{AssetId, Hex};
+use crate::AssetId;
+use lwk_wollet::elements;
+use wasm_bindgen::prelude::*;
 
-#[derive(uniffi::Object, PartialEq, Eq, Debug)]
+/// Wrapper of [`elements::TxOutSecrets`]
+#[derive(PartialEq, Eq, Debug)]
+#[wasm_bindgen]
 pub struct TxOutSecrets {
     inner: elements::TxOutSecrets,
 }
@@ -11,13 +15,14 @@ impl From<elements::TxOutSecrets> for TxOutSecrets {
     }
 }
 
-#[uniffi::export]
+#[wasm_bindgen]
 impl TxOutSecrets {
     pub fn asset(&self) -> AssetId {
         self.inner.asset.into()
     }
 
-    pub fn asset_bf(&self) -> Hex {
+    #[wasm_bindgen(js_name = assetBlindingFactor)]
+    pub fn asset_blinding_factor(&self) -> String {
         self.inner
             .asset_bf
             .to_string()
@@ -29,7 +34,8 @@ impl TxOutSecrets {
         self.inner.value
     }
 
-    pub fn value_bf(&self) -> Hex {
+    #[wasm_bindgen(js_name = valueBlindingFactor)]
+    pub fn value_blinding_factor(&self) -> String {
         self.inner
             .value_bf
             .to_string()
@@ -38,11 +44,14 @@ impl TxOutSecrets {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch = "wasm32"))]
 mod tests {
+    use lwk_wollet::elements;
+    use wasm_bindgen_test::*;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn tx_out_secrets() {
+        // TODO use abf and vbf different from zero
         let elements_tx_out_secrets = elements::TxOutSecrets::new(
             elements::AssetId::default(),
             elements::confidential::AssetBlindingFactor::zero(),
@@ -53,7 +62,7 @@ mod tests {
 
         assert_eq!(tx_out_secrets.value(), 1000);
         assert_eq!(
-            tx_out_secrets.value_bf().to_string(),
+            tx_out_secrets.value_blinding_factor().to_string(),
             "0000000000000000000000000000000000000000000000000000000000000000"
         );
 
@@ -62,7 +71,7 @@ mod tests {
             "0000000000000000000000000000000000000000000000000000000000000000"
         );
         assert_eq!(
-            tx_out_secrets.asset_bf().to_string(),
+            tx_out_secrets.asset_blinding_factor().to_string(),
             "0000000000000000000000000000000000000000000000000000000000000000"
         );
     }
