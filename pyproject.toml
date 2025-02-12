@@ -1,0 +1,17 @@
+[project]
+name = "lwk"
+version = "0.8.3"
+description = "Liquid Wallet Kit"
+keywords = ["liquid", "elements", "wallet"]
+readme = "README-wheel.md"
+
+[project.urls]
+homepage = "https://github.com/blockstream/lwk"
+documentation = "https://docs.rs/lwk_bindings/latest/lwk_bindings/"
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+bindings = "uniffi"

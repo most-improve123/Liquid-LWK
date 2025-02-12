@@ -1,0 +1,67 @@
+on:
+  push:
+    branches:
+      - master
+  pull_request: {}
+
+name: CI
+
+env:
+  RUSTFLAGS: "--cfg=web_sys_unstable_apis"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: ["macos-14", "ubuntu-22.04", "windows-2022"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        if: ${{ matrix.os == 'ubuntu-22.04' }}
+      - run: cargo build
+      - run: cargo build --features serial
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v25
+        with:
+          extra_nix_config: |
+            trusted-public-keys = nix.casatta.it:HseKZh7436/vKXfZDBHbhr7wwAkzjLwY5BIq+OOrITg= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+            substituters = https://nix.casatta.it https://cache.nixos.org/
+      - run: nix build .
+
+  just-swift: # swift framework is built in the lwk-swift repo, here we care `just swift` doesn't brake
+      runs-on: macos-14
+      steps:
+        - uses: actions/checkout@v4
+        - uses: dtolnay/rust-toolchain@1.78.0
+          with:
+            targets: x86_64-apple-ios,aarch64-apple-ios,aarch64-apple-ios-sim
+        - uses: extractions/setup-just@v2
+          with:
+            just-version: 1.5.0  # optional semver specification, otherwise latest
+        - run: just swift
+
+  csharp:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@v2
+      - run: just csharp-windows
+      - run: ls target/release/csharp
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+      - run: cd target/release/csharp && dotnet run && cd -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csharp-windows
+          path: target/release/csharp
+
